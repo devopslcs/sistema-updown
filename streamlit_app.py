@@ -6,7 +6,7 @@ import os
 from urllib.parse import quote
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Sistema UpDown - Orçamentos", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Sistema UpDown Modular", page_icon="🏗️", layout="wide")
 
 # ARQUIVOS
 ARQUIVO_MATERIAIS = 'banco_materiais.csv'
@@ -16,13 +16,10 @@ ARQUIVO_LOGO = 'logo_updown.png'
 # --- FUNÇÕES DE BANCO DE DADOS ---
 def carregar_materiais():
     if not os.path.exists(ARQUIVO_MATERIAIS):
-        # Inicia com alguns exemplos de MATERIAIS apenas
         dados = [
             {"Material": "Selante Fibrado (Balde 10kg)", "Preco_Unitario": 950.00},
             {"Material": "Borracha Líquida (Lata 18L)", "Preco_Unitario": 800.00},
-            {"Material": "Disco de Corte Diamantado", "Preco_Unitario": 150.00},
-            {"Material": "Lâmina de Estilete (Pct)", "Preco_Unitario": 25.00},
-            {"Material": "Saco de Cimento", "Preco_Unitario": 35.00}
+            {"Material": "Disco de Corte", "Preco_Unitario": 150.00},
         ]
         df = pd.DataFrame(dados)
         df.to_csv(ARQUIVO_MATERIAIS, index=False)
@@ -42,8 +39,8 @@ def salvar_historico(dados):
     df_novo = pd.concat([df_hist, pd.DataFrame([dados])], ignore_index=True)
     df_novo.to_csv(ARQUIVO_HISTORICO, index=False)
 
-# --- GERADOR DE PDF ---
-def gerar_pdf(cliente, cnpj, data, validade, desc_servico, lista_materiais, total_mat, valor_mo, total_final, obs):
+# --- GERADOR DE PDF MODULAR ---
+def gerar_pdf_modular(cliente, cnpj, data, validade, blocos_servicos, total_geral_orcamento, obs):
     pdf = FPDF()
     pdf.add_page()
     
@@ -56,7 +53,7 @@ def gerar_pdf(cliente, cnpj, data, validade, desc_servico, lista_materiais, tota
 
     # Cabeçalho
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(190, 10, txt="ORÇAMENTO DE PRESTAÇÃO DE SERVIÇOS", ln=True, align='C')
+    pdf.cell(190, 10, txt="PROPOSTA TÉCNICA E COMERCIAL", ln=True, align='C')
     pdf.set_font("Arial", 'I', 10)
     pdf.cell(190, 10, txt="UPDOWN SERVICOS DE ALTA PERFORMANCE | CNPJ: 36.130.036/0001-37", ln=True, align='C')
     pdf.ln(10)
@@ -70,76 +67,69 @@ def gerar_pdf(cliente, cnpj, data, validade, desc_servico, lista_materiais, tota
     pdf.cell(190, 6, txt=f"Data: {data}  |  Validade: {validade}", ln=True)
     pdf.ln(10)
     
-    # --- 1. DESCRIÇÃO DOS SERVIÇOS ---
-    pdf.set_font("Arial", 'B', 14)
-    pdf.set_fill_color(240, 240, 240)
-    pdf.cell(190, 10, txt="  1. DESCRIÇÃO DOS SERVIÇOS A EXECUTAR", ln=True, align='L', fill=True)
-    pdf.ln(5)
-    
-    pdf.set_font("Arial", size=11)
-    # Imprime o texto que você digitou
-    pdf.multi_cell(190, 6, txt=desc_servico.encode('latin-1', 'replace').decode('latin-1'))
-    pdf.ln(10)
-
-    # --- 2. RELAÇÃO DE MATERIAIS ---
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(190, 10, txt="  2. MATERIAIS INCLUSOS", ln=True, align='L', fill=True)
-    pdf.ln(5)
-
-    if lista_materiais:
-        pdf.set_font("Arial", 'B', 10)
-        pdf.cell(110, 8, "Material", 1)
-        pdf.cell(20, 8, "Qtd", 1, align='C')
-        pdf.cell(30, 8, "Vl. Unit", 1, align='C')
-        pdf.cell(30, 8, "Total", 1, align='C')
+    # --- LOOP DOS BLOCOS DE SERVIÇO ---
+    for idx, bloco in enumerate(blocos_servicos, 1):
+        # Título do Bloco
+        pdf.set_font("Arial", 'B', 14)
+        pdf.set_fill_color(230, 230, 230) # Cinza
+        pdf.cell(190, 10, txt=f"  ITEM {idx}. {bloco['titulo'].upper()}", ln=True, align='L', fill=True)
+        pdf.ln(3)
+        
+        # Descrição Técnica
+        pdf.set_font("Arial", size=11)
+        pdf.multi_cell(190, 6, txt=bloco['descricao'].encode('latin-1', 'replace').decode('latin-1'))
+        pdf.ln(5)
+        
+        # Tabela de Materiais (Se houver)
+        if bloco['materiais']:
+            pdf.set_font("Arial", 'B', 10)
+            pdf.cell(190, 6, "Lista de Materiais Inclusos:", ln=True)
+            
+            pdf.cell(110, 6, "Material", 1)
+            pdf.cell(20, 6, "Qtd", 1, align='C')
+            pdf.cell(30, 6, "Vl. Unit", 1, align='C')
+            pdf.cell(30, 6, "Total", 1, align='C')
+            pdf.ln()
+            
+            pdf.set_font("Arial", size=10)
+            for mat in bloco['materiais']:
+                nome = mat['nome'].encode('latin-1', 'replace').decode('latin-1')
+                pdf.cell(110, 6, nome, 1)
+                pdf.cell(20, 6, str(mat['qtd']), 1, align='C')
+                pdf.cell(30, 6, f"{mat['unit']:,.2f}", 1, align='R')
+                pdf.cell(30, 6, f"{mat['total']:,.2f}", 1, align='R')
+                pdf.ln()
+            pdf.ln(2)
+        
+        # Fechamento do Bloco (Valores Específicos)
+        pdf.set_font("Arial", size=11)
+        pdf.cell(150, 6, "Total Materiais:", 0, align='R')
+        pdf.cell(40, 6, f"R$ {bloco['soma_materiais']:,.2f}", 0, align='R')
         pdf.ln()
         
-        pdf.set_font("Arial", size=10)
-        for item in lista_materiais:
-            nome = item['Material'].encode('latin-1', 'replace').decode('latin-1')
-            pdf.cell(110, 8, nome, 1)
-            pdf.cell(20, 8, str(item['Qtd']), 1, align='C')
-            pdf.cell(30, 8, f"R$ {item['Unitario']:,.2f}", 1, align='R')
-            pdf.cell(30, 8, f"R$ {item['Total']:,.2f}", 1, align='R')
-            pdf.ln()
-    else:
-        pdf.set_font("Arial", 'I', 11)
-        pdf.cell(190, 10, "Nenhum material cobrado separadamente.", ln=True)
+        pdf.cell(150, 6, "Mão de Obra (c/ NF):", 0, align='R')
+        pdf.cell(40, 6, f"R$ {bloco['valor_mo']:,.2f}", 0, align='R')
+        pdf.ln()
+        
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(150, 8, f"TOTAL DO SERVIÇO {idx}:", 0, align='R')
+        pdf.cell(40, 8, f"R$ {bloco['total_bloco']:,.2f}", 0, align='R')
+        pdf.ln(10) # Espaço para o próximo bloco
 
-    pdf.ln(10)
-
-    # --- 3. RESUMO FINANCEIRO ---
-    pdf.set_font("Arial", 'B', 14)
-    pdf.cell(190, 10, txt="  3. VALORES E FECHAMENTO", ln=True, align='L', fill=True)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(5)
-    
-    pdf.set_font("Arial", size=12)
-    
-    # Valor dos Materiais
-    pdf.cell(140, 8, "Total de Materiais:", 0, align='R')
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(50, 8, f"R$ {total_mat:,.2f}", 0, align='R')
-    pdf.ln()
-    
-    # Valor da Mão de Obra
-    pdf.set_font("Arial", size=12)
-    pdf.cell(140, 8, "Mão de Obra Especializada (c/ NF):", 0, align='R')
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(50, 8, f"R$ {valor_mo:,.2f}", 0, align='R')
-    pdf.ln()
-    
-    pdf.line(120, pdf.get_y(), 190, pdf.get_y())
-    pdf.ln(2)
-    
-    # TOTAL GERAL
+
+    # --- TOTAL GERAL ---
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(140, 12, "TOTAL GERAL:", 0, align='R')
-    pdf.cell(50, 12, f"R$ {total_final:,.2f}", 0, align='R')
+    pdf.cell(140, 10, "VALOR TOTAL DA PROPOSTA:", 0, align='R')
+    pdf.set_text_color(0, 0, 128) # Azul escuro
+    pdf.cell(50, 10, f"R$ {total_geral_orcamento:,.2f}", 0, align='R')
+    pdf.set_text_color(0, 0, 0)
     pdf.ln(15)
     
     # Observações
     pdf.set_font("Arial", 'B', 12)
-    pdf.cell(190, 8, "OBSERVAÇÕES / FORMA DE PAGAMENTO:", ln=True)
+    pdf.cell(190, 8, "OBSERVAÇÕES GERAIS:", ln=True)
     pdf.set_font("Arial", size=10)
     pdf.multi_cell(0, 6, txt=obs.encode('latin-1', 'replace').decode('latin-1'))
     
@@ -150,134 +140,160 @@ def gerar_pdf(cliente, cnpj, data, validade, desc_servico, lista_materiais, tota
     
     return pdf.output(dest='S').encode('latin-1')
 
-# --- INTERFACE VISUAL ---
+# --- INTERFACE ---
 st.sidebar.image(ARQUIVO_LOGO, width=200) if os.path.exists(ARQUIVO_LOGO) else None
-st.title("🏗️ Sistema UpDown - Orçamentos")
+st.title("🏗️ Sistema UpDown Modular")
 st.markdown("---")
 
 df_materiais = carregar_materiais()
-menu = st.sidebar.radio("Navegação", ["Novo Orçamento", "Banco de Materiais", "Histórico"])
+menu = st.sidebar.radio("Navegação", ["Criar Orçamento Modular", "Banco de Materiais", "Histórico"])
 
 # ==============================================================================
-# TELA 1: NOVO ORÇAMENTO (O FLUXO QUE VOCÊ PEDIU)
+# TELA 1: ORÇAMENTO MODULAR (BLOCOS)
 # ==============================================================================
-if menu == "Novo Orçamento":
-    st.header("📝 Criar Novo Orçamento")
+if menu == "Criar Orçamento Modular":
     
-    # --- 1. DADOS DO CLIENTE ---
-    with st.expander("1. Dados do Cliente", expanded=True):
+    # 1. Dados do Cliente
+    with st.expander("👤 Dados do Cliente", expanded=True):
         c1, c2, c3 = st.columns([2, 1, 1])
-        cliente = c1.text_input("Nome do Cliente")
-        cnpj = c2.text_input("CNPJ / CPF")
+        cliente = c1.text_input("Cliente")
+        cnpj = c2.text_input("CNPJ/CPF")
         zap = c3.text_input("WhatsApp")
 
-    # --- 2. SERVIÇOS (TEXTO MANUAL) ---
-    with st.expander("2. Descrição dos Serviços (Manual)", expanded=True):
-        st.info("Descreva abaixo todos os serviços que serão prestados.")
-        desc_servico = st.text_area("Serviços a Executar:", height=150, placeholder="Ex: 1. Limpeza da fachada...\n2. Aplicação de selante...")
+    # Inicializa a lista de blocos se não existir
+    if 'blocos_servico' not in st.session_state:
+        st.session_state.blocos_servico = []
 
-    # --- 3. MATERIAIS (DO BANCO DE DADOS) ---
-    with st.expander("3. Adicionar Materiais", expanded=True):
-        c1, c2, c3 = st.columns([3, 1, 1])
-        
-        # Selectbox puxa do CSV
-        material_sel = c1.selectbox("Selecione o Material", df_materiais['Material'].unique())
-        
-        # Pega o preço unitário automático
-        try:
-            preco_base = df_materiais[df_materiais['Material'] == material_sel]['Preco_Unitario'].values[0]
-        except:
-            preco_base = 0.0
-        
-        qtd = c2.number_input("Quantidade", min_value=1, value=1)
-        
-        # Botão Adicionar
-        if 'carrinho_materiais' not in st.session_state: st.session_state.carrinho_materiais = []
-        
-        if c3.button("➕ Adicionar Material"):
-            total_item = preco_base * qtd
-            st.session_state.carrinho_materiais.append({
-                "Material": material_sel,
-                "Qtd": qtd,
-                "Unitario": preco_base,
-                "Total": total_item
-            })
-            st.success("Material adicionado!")
-
-        # Mostra a tabela de materiais se tiver algo
-        soma_materiais = 0.0
-        if st.session_state.carrinho_materiais:
-            df_cart = pd.DataFrame(st.session_state.carrinho_materiais)
-            st.table(df_cart)
-            soma_materiais = df_cart['Total'].sum()
+    st.markdown("### 📋 Serviços e Materiais")
+    
+    # BOTÃO PARA ADICIONAR NOVO BLOCO VAZIO
+    if st.button("➕ Adicionar Novo Bloco de Serviço"):
+        st.session_state.blocos_servico.append({
+            "titulo": "",
+            "descricao": "",
+            "materiais": [], # Lista de materiais deste bloco
+            "valor_mo": 0.0,
+            "soma_materiais": 0.0,
+            "total_bloco": 0.0
+        })
+    
+    # --- LOOP PARA RENDERIZAR CADA BLOCO ---
+    blocos_para_remover = []
+    
+    for i, bloco in enumerate(st.session_state.blocos_servico):
+        st.markdown(f"---")
+        with st.container(border=True):
+            col_titulo, col_del = st.columns([5, 1])
             
-            if st.button("Limpar Materiais"):
-                st.session_state.carrinho_materiais = []
-                st.rerun()
+            # Título do Bloco
+            with col_titulo:
+                bloco['titulo'] = st.text_input(f"Título do Serviço {i+1}", value=bloco['titulo'], placeholder="Ex: Impermeabilização de Janelas", key=f"titulo_{i}")
+            
+            # Botão de Excluir Bloco
+            with col_del:
+                if st.button("🗑️ Remover", key=f"del_bloco_{i}", type="secondary"):
+                    blocos_para_remover.append(i)
 
-    # --- 4. MÃO DE OBRA E FECHAMENTO ---
-    st.markdown("---")
-    st.header("4. Fechamento de Valores")
-    
-    col_valores, col_obs = st.columns([1, 1])
-    
-    with col_valores:
-        st.metric("Total Materiais", f"R$ {soma_materiais:,.2f}")
-        
-        valor_mo = st.number_input("VALOR DA MÃO DE OBRA C/ NF (R$)", min_value=0.0, step=100.0)
-        
-        total_geral = soma_materiais + valor_mo
-        st.markdown(f"### 🏁 TOTAL ORÇAMENTO: R$ {total_geral:,.2f}")
-        
-    with col_obs:
-        obs = st.text_area("Observações Finais", "Pagamento: 50% entrada e saldo na entrega.\nValidade: 15 dias.")
+            # Descrição do Serviço
+            bloco['descricao'] = st.text_area(f"Descrição Técnica (Serviço {i+1})", value=bloco['descricao'], height=100, key=f"desc_{i}", placeholder="1.1 Remoção do selante...\n1.2 Aplicação nova...")
 
+            # --- ÁREA DE MATERIAIS DESTE BLOCO ---
+            st.markdown(f"**Materiais para: {bloco['titulo'] if bloco['titulo'] else 'este serviço'}**")
+            
+            c_mat, c_qtd, c_add = st.columns([3, 1, 1])
+            
+            # Seleção de Material (Puxa do Banco)
+            if not df_materiais.empty:
+                mat_selecionado = c_mat.selectbox("Material", df_materiais['Material'].unique(), key=f"sel_mat_{i}")
+                
+                try:
+                    preco_base = df_materiais[df_materiais['Material'] == mat_selecionado]['Preco_Unitario'].values[0]
+                except:
+                    preco_base = 0.0
+                
+                qtd_mat = c_qtd.number_input("Qtd", 1, key=f"qtd_mat_{i}")
+                
+                if c_add.button("Add Material", key=f"btn_add_mat_{i}"):
+                    total_item = preco_base * qtd_mat
+                    bloco['materiais'].append({
+                        "nome": mat_selecionado,
+                        "qtd": qtd_mat,
+                        "unit": preco_base,
+                        "total": total_item
+                    })
+                    st.rerun()
+
+            # Tabela de Materiais deste bloco
+            soma_mat_bloco = 0.0
+            if bloco['materiais']:
+                df_bloco = pd.DataFrame(bloco['materiais'])
+                st.dataframe(df_bloco, use_container_width=True, hide_index=True)
+                soma_mat_bloco = df_bloco['total'].sum()
+                
+                # Botão limpar materiais deste bloco
+                if st.button("Limpar Materiais", key=f"clean_mat_{i}"):
+                    bloco['materiais'] = []
+                    st.rerun()
+            
+            bloco['soma_materiais'] = soma_mat_bloco
+
+            # --- FECHAMENTO DESTE BLOCO ---
+            c_mo, c_total = st.columns(2)
+            bloco['valor_mo'] = c_mo.number_input(f"Mão de Obra (Serviço {i+1}) R$", min_value=0.0, step=100.0, value=bloco['valor_mo'], key=f"mo_{i}")
+            
+            bloco['total_bloco'] = soma_mat_bloco + bloco['valor_mo']
+            
+            c_total.metric(f"Total Serviço {i+1}", f"R$ {bloco['total_bloco']:,.2f}")
+
+    # Remove blocos se solicitado
+    if blocos_para_remover:
+        for index in sorted(blocos_para_remover, reverse=True):
+            del st.session_state.blocos_servico[index]
+        st.rerun()
+
+    # --- FECHAMENTO GERAL DO ORÇAMENTO ---
     st.markdown("---")
+    st.header("🏁 Fechamento Geral")
     
-    if st.button("✅ GERAR PDF DO ORÇAMENTO", type="primary"):
+    total_geral_orcamento = sum(b['total_bloco'] for b in st.session_state.blocos_servico)
+    
+    col_fin1, col_fin2 = st.columns([1, 2])
+    
+    with col_fin1:
+        st.metric("VALOR TOTAL DA PROPOSTA", f"R$ {total_geral_orcamento:,.2f}")
+    
+    with col_fin2:
+        obs = st.text_area("Observações Finais", "Validade da Proposta: 15 dias.\nPagamento: A combinar.")
+
+    if st.button("✅ GERAR PDF COMPLETO", type="primary"):
         if not cliente:
             st.error("Preencha o nome do cliente!")
+        elif not st.session_state.blocos_servico:
+            st.error("Adicione pelo menos um bloco de serviço!")
         else:
             hoje = datetime.today().strftime("%d/%m/%Y")
             validade = (datetime.today() + timedelta(days=15)).strftime("%d/%m/%Y")
             
-            # Gera PDF
-            pdf_bytes = gerar_pdf(cliente, cnpj, hoje, validade, desc_servico, st.session_state.carrinho_materiais, soma_materiais, valor_mo, total_geral, obs)
+            pdf_bytes = gerar_pdf_modular(cliente, cnpj, hoje, validade, st.session_state.blocos_servico, total_geral_orcamento, obs)
             
             # Salva Histórico
-            link_zap = f"https://wa.me/55{zap}?text={quote(f'Olá {cliente}, segue orçamento. Total: R$ {total_geral:,.2f}')}" if zap else "#"
-            salvar_historico({"Data": hoje, "Cliente": cliente, "Total": total_geral, "Link Zap": link_zap})
+            link_zap = f"https://wa.me/55{zap}?text={quote(f'Olá {cliente}, segue proposta. Total: R$ {total_geral_orcamento:,.2f}')}" if zap else "#"
+            salvar_historico({"Data": hoje, "Cliente": cliente, "Total": total_geral_orcamento, "Link Zap": link_zap})
             
-            st.success("Orçamento gerado!")
-            st.download_button("⬇️ Baixar PDF", pdf_bytes, f"Orcamento_{cliente}.pdf", "application/pdf")
+            st.success("Orçamento Gerado!")
+            st.download_button("⬇️ Baixar PDF", pdf_bytes, f"Proposta_{cliente}.pdf", "application/pdf")
 
 
 # ==============================================================================
-# TELA 2: BANCO DE MATERIAIS (CADASTRO)
+# TELA 2: BANCO DE MATERIAIS
 # ==============================================================================
 elif menu == "Banco de Materiais":
     st.header("📦 Gerenciar Banco de Materiais")
-    st.info("Aqui você cadastra apenas os MATERIAIS e seus PREÇOS UNITÁRIOS.")
     
     df_editado = st.data_editor(
         df_materiais,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "Material": st.column_config.TextColumn("Nome do Material", width="large", required=True),
-            "Preco_Unitario": st.column_config.NumberColumn("Preço Unitário (R$)", format="R$ %.2f", step=1.0)
-        },
-        key="editor_banco"
-    )
-    
-    if st.button("💾 Salvar Alterações no Banco de Dados"):
-        salvar_materiais(df_editado)
-        st.success("Banco de dados atualizado!")
-        st.rerun()
-
-# ==============================================================================
-# TELA 3: HISTÓRICO
-# ==============================================================================
-elif menu == "Histórico":
-    st.header("📂 Histórico de Orçamentos")
-    st.dataframe(carregar_historico(), use_container_width=True)
+            "Material": st.column_config.TextColumn("Nome", width="large", required=True),
+            "Preco_Unitario":
