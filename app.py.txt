@@ -1,0 +1,174 @@
+import streamlit as st
+import pandas as pd
+from fpdf import FPDF
+from datetime import datetime
+
+# Configuração da Página
+st.set_page_config(page_title="Orçamentos UpDown", page_icon="🏗️", layout="wide")
+
+# Título e Logo
+st.title("🏗️ Gerador de Orçamentos - UPDOWN")
+st.markdown("---")
+
+# --- 1. BANCO DE DADOS INICIAL (Simulado) ---
+# Aqui ficam os itens padrão. Você pode adicionar mais na tela, mas ao reiniciar a página, volta para estes.
+if 'materiais' not in st.session_state:
+    dados_iniciais = [
+        {"Item": "Impermeabilização de Janelas (Kit)", "Descricao": "Selante fibrado + Mão de obra", "Preco": 3500.00},
+        {"Item": "Impermeabilização Grades de Ar", "Descricao": "Limpeza + Borracha Líquida", "Preco": 2800.00},
+        {"Item": "Mão de Obra (Diária Equipe)", "Descricao": "02 Alpinistas + Equipamentos", "Preco": 1200.00},
+        {"Item": "Selante Fibrado (Balde)", "Descricao": "Balde 10kg Industrial", "Preco": 950.00},
+        {"Item": "Borracha Líquida (Balde)", "Descricao": "Balde 20kg", "Preco": 900.00},
+        {"Item": "Taxa de Mobilização", "Descricao": "Transporte e Montagem", "Preco": 500.00}
+    ]
+    st.session_state.materiais = pd.DataFrame(dados_iniciais)
+
+# --- 2. MENU LATERAL ---
+st.sidebar.header("Navegação")
+opcao = st.sidebar.radio("Ir para:", ["Criar Orçamento", "Cadastrar Novo Item"])
+
+# --- FUNÇÃO PARA GERAR PDF ---
+def gerar_pdf(cliente, cnpj, data, itens, total, obs):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    
+    # Cabeçalho
+    pdf.cell(190, 10, txt="UPDOWN - SERVICOS DE ALTA PERFORMANCE", ln=True, align='C')
+    pdf.set_font("Arial", 'I', 10)
+    pdf.cell(190, 10, txt="CNPJ: 36.130.036/0001-37 | Ponta Grossa - PR", ln=True, align='C')
+    pdf.ln(10)
+    
+    # Dados do Cliente
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(190, 10, txt="DADOS DO CLIENTE", ln=True, align='L')
+    pdf.set_font("Arial", size=11)
+    pdf.cell(190, 8, txt=f"Cliente: {cliente}", ln=True)
+    pdf.cell(190, 8, txt=f"CNPJ/CPF: {cnpj}", ln=True)
+    pdf.cell(190, 8, txt=f"Data do Orcamento: {data}", ln=True)
+    pdf.ln(10)
+    
+    # Tabela de Itens
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(90, 10, "Descricao do Servico/Material", 1)
+    pdf.cell(20, 10, "Qtd", 1, align='C')
+    pdf.cell(35, 10, "Vl. Unit", 1, align='C')
+    pdf.cell(35, 10, "Total", 1, align='C')
+    pdf.ln()
+    
+    pdf.set_font("Arial", size=10)
+    for i in itens:
+        # Tratamento simples para caracteres especiais no PDF (remove acentos básicos para não quebrar)
+        nome_item = i['Item'].encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(90, 10, nome_item, 1)
+        pdf.cell(20, 10, str(i['Qtd']), 1, align='C')
+        pdf.cell(35, 10, f"R$ {i['Unitario']:.2f}", 1, align='R')
+        pdf.cell(35, 10, f"R$ {i['Total']:.2f}", 1, align='R')
+        pdf.ln()
+        
+    pdf.ln(5)
+    
+    # Total
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(145, 10, "VALOR TOTAL:", 0, align='R')
+    pdf.cell(35, 10, f"R$ {total:,.2f}", 1, align='R')
+    pdf.ln(15)
+    
+    # Observações
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(190, 10, "CONDICOES E OBSERVACOES:", ln=True)
+    pdf.set_font("Arial", size=10)
+    pdf.multi_cell(0, 8, txt=obs.encode('latin-1', 'replace').decode('latin-1'))
+    
+    pdf.ln(20)
+    pdf.cell(190, 10, "__________________________________________________", ln=True, align='C')
+    pdf.cell(190, 5, "UPDOWN SERVICOS DE ALTA PERFORMANCE", ln=True, align='C')
+    
+    return pdf.output(dest='S').encode('latin-1')
+
+# --- TELA 1: CADASTRAR ITEM ---
+if opcao == "Cadastrar Novo Item":
+    st.subheader("📦 Cadastrar Novo Item no Banco de Dados (Temporário)")
+    st.info("Nota: Itens adicionados aqui valem para a sessão atual. Para salvar fixo, altere o código.")
+    
+    with st.form("form_add"):
+        c1, c2 = st.columns([3, 1])
+        novo_nome = c1.text_input("Nome do Item / Serviço")
+        novo_preco = c2.number_input("Preço Base (R$)", min_value=0.0, value=100.0)
+        nova_desc = st.text_input("Descrição Detalhada")
+        btn_add = st.form_submit_button("Adicionar à Lista")
+        
+        if btn_add and novo_nome:
+            novo = {"Item": novo_nome, "Descricao": nova_desc, "Preco": novo_preco}
+            st.session_state.materiais = pd.concat([st.session_state.materiais, pd.DataFrame([novo])], ignore_index=True)
+            st.success("Item adicionado!")
+
+    st.write("### Itens Disponíveis:")
+    st.dataframe(st.session_state.materiais, use_container_width=True)
+
+# --- TELA 2: CRIAR ORÇAMENTO ---
+elif opcao == "Criar Orçamento":
+    st.subheader("📝 Gerar Novo Orçamento")
+    
+    col_cli1, col_cli2, col_cli3 = st.columns([2, 1, 1])
+    cliente = col_cli1.text_input("Nome do Contratante")
+    cnpj = col_cli2.text_input("CNPJ / CPF")
+    data_orc = col_cli3.date_input("Data", datetime.today())
+    
+    st.markdown("---")
+    
+    # Área de Seleção
+    c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+    
+    lista_itens = st.session_state.materiais['Item'].unique()
+    item_sel = c1.selectbox("Selecione o Item", lista_itens)
+    
+    # Achar preço base
+    preco_base = st.session_state.materiais.loc[st.session_state.materiais['Item'] == item_sel, 'Preco'].values[0]
+    
+    qtd = c2.number_input("Quantidade", min_value=1, value=1)
+    preco_final = c3.number_input("Preço Unitário (R$)", value=float(preco_base))
+    
+    # Carrinho
+    if 'carrinho' not in st.session_state:
+        st.session_state.carrinho = []
+        
+    if c4.button("➕ Adicionar"):
+        st.session_state.carrinho.append({
+            "Item": item_sel,
+            "Qtd": qtd,
+            "Unitario": preco_final,
+            "Total": qtd * preco_final
+        })
+        st.success("Item adicionado!")
+
+    # Exibir Tabela de Orçamento
+    if len(st.session_state.carrinho) > 0:
+        st.write("### Itens do Orçamento:")
+        df_carrinho = pd.DataFrame(st.session_state.carrinho)
+        st.table(df_carrinho)
+        
+        total_geral = df_carrinho['Total'].sum()
+        st.markdown(f"## 💰 Total Geral: R$ {total_geral:,.2f}")
+        
+        if st.button("🗑️ Limpar Tudo"):
+            st.session_state.carrinho = []
+            st.rerun()
+            
+        st.markdown("---")
+        obs_padrao = "Pagamento: 50% na entrada e 50% na entrega.\nValidade: 15 dias.\nGarantia: 06 meses."
+        obs = st.text_area("Considerações Finais", value=obs_padrao, height=100)
+        
+        # Gerar PDF
+        if st.button("📄 Baixar PDF do Orçamento"):
+            if not cliente:
+                st.error("Preencha o nome do cliente antes de baixar!")
+            else:
+                data_str = data_orc.strftime("%d/%m/%Y")
+                pdf_bytes = gerar_pdf(cliente, cnpj, data_str, st.session_state.carrinho, total_geral, obs)
+                st.download_button(
+                    label="⬇️ Clique aqui para Salvar o PDF",
+                    data=pdf_bytes,
+                    file_name=f"Orcamento_UpDown_{cliente.replace(' ', '_')}.pdf",
+                    mime="application/pdf"
+                )
