@@ -58,7 +58,7 @@ def gerar_pdf(cliente, cnpj, data, validade, desc_servico, lista_materiais, tota
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(190, 10, txt="ORÇAMENTO DE PRESTAÇÃO DE SERVIÇOS", ln=True, align='C')
     pdf.set_font("Arial", 'I', 10)
-    pdf.cell(190, 10, txt="UPDOWN SERVIÇOS DE ALTA PERFORMANCE | CNPJ: 36.130.036/0001-37", ln=True, align='C')
+    pdf.cell(190, 10, txt="UPDOWN SERVICOS DE ALTA PERFORMANCE | CNPJ: 36.130.036/0001-37", ln=True, align='C')
     pdf.ln(10)
     
     # Cliente
@@ -184,7 +184,10 @@ if menu == "Novo Orçamento":
         material_sel = c1.selectbox("Selecione o Material", df_materiais['Material'].unique())
         
         # Pega o preço unitário automático
-        preco_base = df_materiais[df_materiais['Material'] == material_sel]['Preco_Unitario'].values[0]
+        try:
+            preco_base = df_materiais[df_materiais['Material'] == material_sel]['Preco_Unitario'].values[0]
+        except:
+            preco_base = 0.0
         
         qtd = c2.number_input("Quantidade", min_value=1, value=1)
         
@@ -216,5 +219,65 @@ if menu == "Novo Orçamento":
     st.markdown("---")
     st.header("4. Fechamento de Valores")
     
-    col_valores, col_obs = st.columns([1, 1]
+    col_valores, col_obs = st.columns([1, 1])
+    
+    with col_valores:
+        st.metric("Total Materiais", f"R$ {soma_materiais:,.2f}")
+        
+        valor_mo = st.number_input("VALOR DA MÃO DE OBRA C/ NF (R$)", min_value=0.0, step=100.0)
+        
+        total_geral = soma_materiais + valor_mo
+        st.markdown(f"### 🏁 TOTAL ORÇAMENTO: R$ {total_geral:,.2f}")
+        
+    with col_obs:
+        obs = st.text_area("Observações Finais", "Pagamento: 50% entrada e saldo na entrega.\nValidade: 15 dias.")
 
+    st.markdown("---")
+    
+    if st.button("✅ GERAR PDF DO ORÇAMENTO", type="primary"):
+        if not cliente:
+            st.error("Preencha o nome do cliente!")
+        else:
+            hoje = datetime.today().strftime("%d/%m/%Y")
+            validade = (datetime.today() + timedelta(days=15)).strftime("%d/%m/%Y")
+            
+            # Gera PDF
+            pdf_bytes = gerar_pdf(cliente, cnpj, hoje, validade, desc_servico, st.session_state.carrinho_materiais, soma_materiais, valor_mo, total_geral, obs)
+            
+            # Salva Histórico
+            link_zap = f"https://wa.me/55{zap}?text={quote(f'Olá {cliente}, segue orçamento. Total: R$ {total_geral:,.2f}')}" if zap else "#"
+            salvar_historico({"Data": hoje, "Cliente": cliente, "Total": total_geral, "Link Zap": link_zap})
+            
+            st.success("Orçamento gerado!")
+            st.download_button("⬇️ Baixar PDF", pdf_bytes, f"Orcamento_{cliente}.pdf", "application/pdf")
+
+
+# ==============================================================================
+# TELA 2: BANCO DE MATERIAIS (CADASTRO)
+# ==============================================================================
+elif menu == "Banco de Materiais":
+    st.header("📦 Gerenciar Banco de Materiais")
+    st.info("Aqui você cadastra apenas os MATERIAIS e seus PREÇOS UNITÁRIOS.")
+    
+    df_editado = st.data_editor(
+        df_materiais,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Material": st.column_config.TextColumn("Nome do Material", width="large", required=True),
+            "Preco_Unitario": st.column_config.NumberColumn("Preço Unitário (R$)", format="R$ %.2f", step=1.0)
+        },
+        key="editor_banco"
+    )
+    
+    if st.button("💾 Salvar Alterações no Banco de Dados"):
+        salvar_materiais(df_editado)
+        st.success("Banco de dados atualizado!")
+        st.rerun()
+
+# ==============================================================================
+# TELA 3: HISTÓRICO
+# ==============================================================================
+elif menu == "Histórico":
+    st.header("📂 Histórico de Orçamentos")
+    st.dataframe(carregar_historico(), use_container_width=True)
