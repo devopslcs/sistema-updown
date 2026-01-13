@@ -296,4 +296,19 @@ elif menu == "Banco de Materiais":
         use_container_width=True,
         column_config={
             "Material": st.column_config.TextColumn("Nome", width="large", required=True),
-            "Preco_Unitario":
+            "Preco_Unitario": st.column_config.NumberColumn("Preço Unitário (R$)", format="R$ %.2f")
+        },
+        key="editor_banco"
+    )
+    
+    if st.button("💾 Salvar Banco de Dados"):
+        salvar_materiais(df_editado)
+        st.success("Salvo!")
+        st.rerun()
+
+# ==============================================================================
+# TELA 3: HISTÓRICO
+# ==============================================================================
+elif menu == "Histórico":
+    st.header("📂 Histórico")
+    st.dataframe(carregar_historico(), use_container_width=True)
