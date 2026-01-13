@@ -216,4 +216,5 @@ if menu == "Novo Orçamento":
     st.markdown("---")
     st.header("4. Fechamento de Valores")
     
-    col_valores, col_obs = st.columns([1, 1
+    col_valores, col_obs = st.columns([1, 1]
+
