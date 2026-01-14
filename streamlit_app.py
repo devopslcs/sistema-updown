@@ -12,22 +12,25 @@ st.set_page_config(page_title="Sistema UpDown Pro", page_icon="🏗️", layout=
 # ARQUIVOS DE DADOS E IMAGENS
 ARQUIVO_MATERIAIS = 'banco_materiais.csv'
 ARQUIVO_HISTORICO = 'historico_orcamentos.csv'
-ARQUIVO_LOGO = 'Logo sem fundo.png' # Seu arquivo enviado
+ARQUIVO_LOGO = 'Logo sem fundo.png' # Certifique-se que o arquivo existe com este nome exato
 ARQUIVO_WATERMARK = 'watermark_temp.png'
 
-# --- FUNÇÃO AUXILIAR: MARCA D'ÁGUA ---
+# --- FUNÇÃO AUXILIAR: GERAR MARCA D'ÁGUA TRANSPARENTE ---
 def preparar_marca_dagua():
-    if os.path.exists(ARQUIVO_LOGO) and not os.path.exists(ARQUIVO_WATERMARK):
-        try:
-            img = Image.open(ARQUIVO_LOGO).convert("RGBA")
-            datas = img.getdata()
-            new_data = []
-            for item in datas:
-                new_data.append((item[0], item[1], item[2], int(item[3] * 0.12)))
-            img.putdata(new_data)
-            img.save(ARQUIVO_WATERMARK, "PNG")
-        except Exception as e:
-            st.error(f"Erro ao processar marca d'água: {e}")
+    # Só gera se o logo existe e a marca d'água ainda não foi criada
+    if os.path.exists(ARQUIVO_LOGO):
+        if not os.path.exists(ARQUIVO_WATERMARK):
+            try:
+                img = Image.open(ARQUIVO_LOGO).convert("RGBA")
+                datas = img.getdata()
+                new_data = []
+                # Ajusta a transparência (Alpha) para 10% (0.10)
+                for item in datas:
+                    new_data.append((item[0], item[1], item[2], int(item[3] * 0.10)))
+                img.putdata(new_data)
+                img.save(ARQUIVO_WATERMARK, "PNG")
+            except Exception as e:
+                st.error(f"Erro ao criar marca d'água: {e}")
 
 # --- FUNÇÕES DE BANCO DE DADOS ---
 def carregar_materiais():
@@ -61,17 +64,23 @@ def salvar_historico(dados):
     df_novo = pd.concat([df_hist, pd.DataFrame([dados])], ignore_index=True)
     df_novo.to_csv(ARQUIVO_HISTORICO, index=False)
 
-# --- CLASSE PDF ---
+# --- CLASSE PDF (HEADER COM LOGO E MARCA D'ÁGUA) ---
 class PDF(FPDF):
     def header(self):
+        # 1. MARCA D'ÁGUA (Fundo Centralizado)
+        # Colocamos primeiro para ficar atrás do texto
         if os.path.exists(ARQUIVO_WATERMARK):
+            # A4 largura = 210mm. Imagem w=120. (210-120)/2 = 45 (centralizado)
+            # y=80 para ficar no meio da folha verticalmente
             self.image(ARQUIVO_WATERMARK, x=45, y=80, w=120)
         
+        # 2. LOGO CABEÇALHO (Canto Superior Esquerdo)
         if os.path.exists(ARQUIVO_LOGO):
-            self.image(ARQUIVO_LOGO, 10, 8, 30)
+            self.image(ARQUIVO_LOGO, x=10, y=8, w=30)
         
+        # 3. TEXTOS DO CABEÇALHO (Ao lado do Logo)
         self.set_y(12)
-        self.set_x(42)
+        self.set_x(42) # Move para a direita do logo (10+30+margem)
         self.set_font("Arial", 'B', 14)
         self.cell(0, 5, "UPDOWN - SERVIÇOS DE ALTA PERFORMANCE", ln=True, align='L')
         
@@ -79,14 +88,17 @@ class PDF(FPDF):
         self.set_font("Arial", '', 10)
         self.cell(0, 5, "CNPJ: 36.130.036/0001-37", ln=True, align='L')
         
-        self.ln(10)
-        self.set_draw_color(200, 200, 200)
+        # Linha separadora
+        self.ln(12)
+        self.set_draw_color(200, 200, 200) # Cinza claro
         self.line(10, 32, 200, 32)
         self.ln(5)
 
-# --- GERADOR PDF ---
+# --- GERADOR DE PDF ---
 def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, texto_comercial, obs):
+    # Garante que a marca d'água existe antes de gerar o PDF
     preparar_marca_dagua()
+    
     pdf = PDF()
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
@@ -95,7 +107,7 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
     pdf.cell(190, 10, txt="PROPOSTA TÉCNICA E COMERCIAL", ln=True, align='C')
     pdf.ln(5)
     
-    # Cliente
+    # Dados do Cliente
     pdf.set_fill_color(245, 245, 245)
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(190, 8, "  DADOS DO CLIENTE:", ln=True, fill=True)
@@ -105,22 +117,25 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
     pdf.cell(190, 6, f"  Data: {data}   |   Validade: {validade}", ln=True)
     pdf.ln(5)
     
-    # Blocos
+    # Blocos de Serviço
     for i, bloco in enumerate(blocos, 1):
         pdf.set_font("Arial", 'B', 13)
-        pdf.set_fill_color(255, 204, 102)
+        pdf.set_fill_color(255, 204, 102) # Laranja UpDown
         pdf.set_text_color(0, 0, 0)
         
+        # Quebra de página se estiver no fim
         if pdf.get_y() > 240: pdf.add_page()
         
         pdf.cell(190, 8, txt=f"  ITEM {i}. {bloco['titulo'].upper()}", ln=True, align='L', fill=True)
         pdf.ln(2)
         
+        # Descrição
         pdf.set_font("Arial", '', 11)
         desc_limpa = bloco['descricao'].encode('latin-1', 'replace').decode('latin-1')
         pdf.multi_cell(190, 6, txt=desc_limpa)
         pdf.ln(3)
         
+        # Tabela de Materiais
         if bloco['materiais']:
             pdf.set_font("Arial", 'B', 10)
             pdf.cell(190, 6, "Materiais Inclusos:", ln=True)
@@ -140,6 +155,7 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
                 pdf.cell(30, 6, f"{mat['total']:,.2f}", 1, 1, 'R')
             pdf.ln(2)
 
+        # Totais do Bloco
         pdf.set_font("Arial", '', 11)
         pdf.cell(150, 6, "Total Materiais:", 0, align='R')
         pdf.cell(40, 6, f"R$ {bloco['soma_materiais']:,.2f}", 0, align='R')
@@ -153,16 +169,17 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
         pdf.cell(40, 8, f"R$ {bloco['total_bloco']:,.2f}", 0, align='R')
         pdf.ln(8)
         
+        # Linha separadora
         pdf.set_draw_color(220, 220, 220)
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.ln(5)
 
-    # Comercial
+    # Proposta Comercial
     if pdf.get_y() > 200: pdf.add_page()
 
     pdf.set_font("Arial", 'B', 13)
-    pdf.set_fill_color(50, 50, 50)
-    pdf.set_text_color(255, 255, 255)
+    pdf.set_fill_color(50, 50, 50) # Cinza Escuro
+    pdf.set_text_color(255, 255, 255) # Branco
     pdf.cell(190, 8, txt="  PROPOSTA COMERCIAL", ln=True, align='L', fill=True)
     pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
@@ -172,6 +189,7 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
     pdf.multi_cell(190, 6, txt=txt_com_limpo)
     pdf.ln(5)
     
+    # Ajuste de Valores
     if total_final != total_calc:
         pdf.set_font("Arial", '', 11)
         pdf.cell(140, 8, "Soma dos Serviços:", 0, align='R')
@@ -183,21 +201,27 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
         pdf.cell(50, 8, f"R$ {diff:,.2f}", 0, align='R')
         pdf.ln(2)
 
+    # Valor Final
     pdf.set_font("Arial", 'B', 16)
     pdf.set_fill_color(240, 240, 240)
     pdf.cell(140, 12, "VALOR FINAL:", 0, align='R', fill=True)
     pdf.cell(50, 12, f"R$ {total_final:,.2f}", 0, align='R', fill=True)
     pdf.ln(10)
     
+    # Obs Rodapé
     pdf.set_font("Arial", 'I', 9)
     obs_limpa = obs.encode('latin-1', 'replace').decode('latin-1')
     pdf.multi_cell(190, 5, txt=f"Obs: {obs_limpa}")
     
     return pdf.output(dest='S').encode('latin-1')
 
-# --- INTERFACE ---
+# --- INTERFACE PRINCIPAL ---
 if os.path.exists(ARQUIVO_LOGO):
     st.sidebar.image(ARQUIVO_LOGO, width=200)
+else:
+    # Aviso caso o logo não seja encontrado (pra te ajudar a debugar)
+    st.sidebar.warning("Logo não encontrado! Verifique se 'Logo sem fundo.png' está na pasta.")
+
 st.title("🏗️ Sistema UpDown - Comercial")
 st.markdown("---")
 
@@ -259,21 +283,20 @@ if menu == "Novo Orçamento":
                     else:
                         st.warning("Selecione um material.")
 
-            # TABELA EDITÁVEL (AQUI ESTÁ A MUDANÇA)
+            # TABELA EDITÁVEL INTELIGENTE
             soma_temp = 0.0
             if bloco['materiais']:
                 df_b = pd.DataFrame(bloco['materiais'])
                 
-                # Editor poderoso
                 edited_df = st.data_editor(
                     df_b,
                     column_config={
                         "nome": st.column_config.TextColumn("Material", disabled=True),
-                        "qtd": st.column_config.NumberColumn("Qtd", min_value=0.1, step=1.0, required=True),
+                        "qtd": st.column_config.NumberColumn("Qtd", min_value=0.01, step=0.01, required=True),
                         "unit": st.column_config.NumberColumn("Unit", format="R$ %.2f", disabled=True),
                         "total": st.column_config.NumberColumn("Total", format="R$ %.2f", disabled=True)
                     },
-                    num_rows="dynamic", # PERMITE EXCLUIR LINHAS
+                    num_rows="dynamic",
                     use_container_width=True,
                     key=f"editor_{i}",
                     hide_index=True
@@ -282,19 +305,13 @@ if menu == "Novo Orçamento":
                 # LÓGICA DE ATUALIZAÇÃO E RECÁLCULO
                 new_materials = []
                 for idx, row in edited_df.iterrows():
-                    # Ignora linhas vazias criadas manualmente sem nome
                     if pd.isna(row['nome']) or row['nome'] == "": continue
-                    
                     new_total = row['unit'] * row['qtd']
                     new_materials.append({
-                        "nome": row['nome'],
-                        "qtd": row['qtd'],
-                        "unit": row['unit'],
-                        "total": new_total
+                        "nome": row['nome'], "qtd": row['qtd'], "unit": row['unit'], "total": new_total
                     })
                     soma_temp += new_total
                 
-                # Se houver mudança, atualiza sessão e recarrega para mostrar totais novos
                 if new_materials != bloco['materiais']:
                     bloco['materiais'] = new_materials
                     bloco['soma_materiais'] = soma_temp
@@ -339,9 +356,12 @@ if menu == "Novo Orçamento":
         else:
             hoje = datetime.today().strftime("%d/%m/%Y")
             val = (datetime.today() + timedelta(days=15)).strftime("%d/%m/%Y")
+            
             pdf_bytes = gerar_pdf(cliente, cnpj, hoje, val, st.session_state.blocos, total_calc, total_final, txt_com, obs)
+            
             link = f"https://wa.me/55{zap}?text={quote(f'Olá {cliente}, proposta: R$ {total_final:,.2f}')}" if zap else "#"
             salvar_historico({"Data": hoje, "Cliente": cliente, "Total": total_final, "Link Zap": link})
+            
             st.success("Gerado com sucesso!")
             c1, c2 = st.columns(2)
             c1.download_button("⬇️ Baixar PDF", pdf_bytes, f"Proposta_{cliente}.pdf", "application/pdf")
