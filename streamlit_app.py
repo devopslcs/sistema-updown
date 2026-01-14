@@ -4,40 +4,52 @@ from fpdf import FPDF
 from datetime import datetime, timedelta
 import os
 from urllib.parse import quote
+from PIL import Image # Necessário para tratar a transparência da imagem
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Sistema UpDown Pro", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="Sistema UpDown Premium", page_icon="🏗️", layout="wide")
 
-# ARQUIVOS DE DADOS
+# ARQUIVOS DE DADOS E IMAGENS
 ARQUIVO_MATERIAIS = 'banco_materiais.csv'
 ARQUIVO_HISTORICO = 'historico_orcamentos.csv'
-ARQUIVO_LOGO = 'logo_updown.png'
+# Atualizado para o nome do seu arquivo enviado
+ARQUIVO_LOGO = 'Logo sem fundo.png' 
+ARQUIVO_WATERMARK = 'watermark_temp.png' # Arquivo temporário que o sistema vai criar
+
+# --- FUNÇÃO AUXILIAR: CRIAR MARCA D'ÁGUA ---
+def preparar_marca_dagua():
+    """Cria uma versão transparente do logo para usar de fundo se ela não existir"""
+    if os.path.exists(ARQUIVO_LOGO) and not os.path.exists(ARQUIVO_WATERMARK):
+        try:
+            img = Image.open(ARQUIVO_LOGO).convert("RGBA")
+            # Diminui a opacidade (Alpha) para 12% (bem clarinho)
+            datas = img.getdata()
+            new_data = []
+            for item in datas:
+                # Mantém as cores (0,1,2) e muda a transparência (3)
+                new_data.append((item[0], item[1], item[2], int(item[3] * 0.12)))
+            img.putdata(new_data)
+            img.save(ARQUIVO_WATERMARK, "PNG")
+        except Exception as e:
+            st.error(f"Erro ao processar marca d'água: {e}")
 
 # --- FUNÇÕES DE BANCO DE DADOS ---
 def carregar_materiais():
-    # Cria estrutura padrão se não existir arquivo
     if not os.path.exists(ARQUIVO_MATERIAIS):
         dados = [
             {"Material": "Selante Fibrado (Balde 10kg)", "Descricao": "Cor Cinza - Uso Externo", "Preco_Unitario": 950.00},
             {"Material": "Borracha Líquida (Lata 18L)", "Descricao": "Impermeabilizante Branco", "Preco_Unitario": 800.00},
-            {"Material": "Disco de Corte", "Descricao": "Diamantado 110mm", "Preco_Unitario": 150.00},
         ]
         df = pd.DataFrame(dados)
         df.to_csv(ARQUIVO_MATERIAIS, index=False)
         return df
     
-    # Carrega arquivo existente
     df = pd.read_csv(ARQUIVO_MATERIAIS)
-    
-    # GARANTIA: Se o arquivo antigo não tiver a coluna Descricao, cria ela agora
     if "Descricao" not in df.columns:
         df["Descricao"] = ""
-        # Reorganiza as colunas para ficar bonito
         cols = ["Material", "Descricao", "Preco_Unitario"]
-        # Garante que só pegamos colunas que existem (caso tenha outras)
         cols = [c for c in cols if c in df.columns] + [c for c in df.columns if c not in cols]
         df = df[cols]
-        
     return df
 
 def salvar_materiais(df):
@@ -53,67 +65,93 @@ def salvar_historico(dados):
     df_novo = pd.concat([df_hist, pd.DataFrame([dados])], ignore_index=True)
     df_novo.to_csv(ARQUIVO_HISTORICO, index=False)
 
+# --- CLASSE PDF PERSONALIZADA (PARA CABEÇALHO E FUNDO EM TODAS AS PÁGINAS) ---
+class PDF(FPDF):
+    def header(self):
+        # 1. MARCA D'ÁGUA (FUNDO CENTRALIZADO)
+        # Verifica se existe o arquivo transparente criado
+        if os.path.exists(ARQUIVO_WATERMARK):
+            # Posiciona no centro da página (A4 tem 210mm de largura)
+            # Imagem com 120mm de largura, x = (210-120)/2 = 45
+            self.image(ARQUIVO_WATERMARK, x=45, y=80, w=120)
+        
+        # 2. LOGO DO CABEÇALHO (CANTO SUPERIOR ESQUERDO)
+        if os.path.exists(ARQUIVO_LOGO):
+            self.image(ARQUIVO_LOGO, 10, 8, 30) # x=10, y=8, largura=30
+        
+        # 3. TEXTOS DO CABEÇALHO
+        self.set_y(12) # Alinha altura com a imagem
+        self.set_x(42) # Move para a direita da logo
+        self.set_font("Arial", 'B', 14)
+        self.cell(0, 5, "UPDOWN - SERVIÇOS DE ALTA PERFORMANCE", ln=True, align='L')
+        
+        self.set_x(42)
+        self.set_font("Arial", '', 10)
+        self.cell(0, 5, "CNPJ: 36.130.036/0001-37", ln=True, align='L')
+        
+        # Linha separadora
+        self.ln(10)
+        self.set_draw_color(200, 200, 200) # Cinza claro
+        self.line(10, 32, 200, 32)
+        self.ln(5) # Espaço após a linha
+
 # --- GERADOR DE PDF ---
 def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, texto_comercial, obs):
-    class PDF(FPDF):
-        def header(self):
-            if os.path.exists(ARQUIVO_LOGO):
-                self.image(ARQUIVO_LOGO, 10, 8, 40)
-            self.ln(25)
-
-    pdf = PDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    # Prepara a marca d'água antes de gerar
+    preparar_marca_dagua()
+    
+    pdf = PDF() # Usa nossa classe personalizada
+    pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
     
-    # Cabeçalho
-    pdf.set_y(30)
+    # Título do Documento
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(190, 10, txt="PROPOSTA TÉCNICA E COMERCIAL", ln=True, align='C')
-    pdf.set_font("Arial", 'I', 10)
-    pdf.cell(190, 6, txt="UPDOWN SERVICOS DE ALTA PERFORMANCE | CNPJ: 36.130.036/0001-37", ln=True, align='C')
-    pdf.ln(10)
+    pdf.ln(5)
     
-    # Cliente
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(190, 8, txt="DADOS DO CLIENTE", ln=True, align='L')
-    pdf.set_font("Arial", size=11)
-    pdf.cell(190, 6, txt=f"Cliente: {cliente}", ln=True)
-    pdf.cell(190, 6, txt=f"CNPJ/CPF: {cnpj}", ln=True)
-    pdf.cell(190, 6, txt=f"Data: {data}  |  Validade: {validade}", ln=True)
-    pdf.ln(10)
+    # Dados do Cliente
+    pdf.set_fill_color(245, 245, 245)
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(190, 8, "  DADOS DO CLIENTE:", ln=True, fill=True)
     
-    # --- BLOCOS ---
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(190, 6, f"  Cliente: {cliente}", ln=True)
+    pdf.cell(190, 6, f"  CNPJ/CPF: {cnpj}", ln=True)
+    pdf.cell(190, 6, f"  Data de Emissão: {data}   |   Validade: {validade}", ln=True)
+    pdf.ln(5)
+    
+    # --- BLOCOS DE SERVIÇO ---
     for i, bloco in enumerate(blocos, 1):
         # Título
-        pdf.set_font("Arial", 'B', 14)
-        pdf.set_fill_color(230, 230, 230)
-        # Salva Y para evitar quebra ruim
-        if pdf.get_y() > 250: pdf.add_page()
+        pdf.set_font("Arial", 'B', 13)
+        pdf.set_fill_color(255, 204, 102) # Um amarelo/laranja suave combinando com UpDown
+        pdf.set_text_color(0, 0, 0)
         
-        pdf.multi_cell(190, 10, txt=f"ITEM {i}. {bloco['titulo'].upper()}", align='L', fill=True)
+        if pdf.get_y() > 240: pdf.add_page() # Quebra página se estiver no fim
+        
+        pdf.cell(190, 8, txt=f"  ITEM {i}. {bloco['titulo'].upper()}", ln=True, align='L', fill=True)
         pdf.ln(2)
         
         # Descrição
-        pdf.set_font("Arial", size=11)
+        pdf.set_font("Arial", '', 11)
         desc_limpa = bloco['descricao'].encode('latin-1', 'replace').decode('latin-1')
         pdf.multi_cell(190, 6, txt=desc_limpa)
-        pdf.ln(5)
+        pdf.ln(3)
         
         # Materiais
         if bloco['materiais']:
             pdf.set_font("Arial", 'B', 10)
             pdf.cell(190, 6, "Materiais Inclusos:", ln=True)
             
-            pdf.set_fill_color(245, 245, 245)
-            pdf.cell(110, 6, "Material", 1, 0, 'L', True)
+            pdf.set_fill_color(240, 240, 240)
+            pdf.cell(110, 6, "Material / Descrição", 1, 0, 'L', True)
             pdf.cell(20, 6, "Qtd", 1, 0, 'C', True)
             pdf.cell(30, 6, "Unit", 1, 0, 'C', True)
             pdf.cell(30, 6, "Total", 1, 1, 'C', True)
             
-            pdf.set_font("Arial", size=10)
+            pdf.set_font("Arial", '', 10)
             for mat in bloco['materiais']:
                 nome = mat['nome'].encode('latin-1', 'replace').decode('latin-1')
-                # Corta nome se muito grande
                 nome = (nome[:55] + '...') if len(nome) > 55 else nome
                 
                 pdf.cell(110, 6, nome, 1)
@@ -122,8 +160,8 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
                 pdf.cell(30, 6, f"{mat['total']:,.2f}", 1, 1, 'R')
             pdf.ln(2)
 
-        # Valores
-        pdf.set_font("Arial", size=11)
+        # Totais do Bloco
+        pdf.set_font("Arial", '', 11)
         pdf.cell(150, 6, "Total Materiais:", 0, align='R')
         pdf.cell(40, 6, f"R$ {bloco['soma_materiais']:,.2f}", 0, align='R')
         pdf.ln()
@@ -131,55 +169,59 @@ def gerar_pdf(cliente, cnpj, data, validade, blocos, total_calc, total_final, te
         pdf.cell(40, 6, f"R$ {bloco['valor_mo']:,.2f}", 0, align='R')
         pdf.ln()
         
-        pdf.set_font("Arial", 'B', 12)
+        pdf.set_font("Arial", 'B', 11)
         pdf.cell(150, 8, f"TOTAL DO SERVIÇO {i}:", 0, align='R')
         pdf.cell(40, 8, f"R$ {bloco['total_bloco']:,.2f}", 0, align='R')
-        pdf.ln(10)
-    
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(5)
+        pdf.ln(8)
+        
+        pdf.set_draw_color(220, 220, 220)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(5)
 
     # --- COMERCIAL ---
-    if pdf.get_y() > 220: pdf.add_page()
+    if pdf.get_y() > 200: pdf.add_page()
 
-    pdf.set_font("Arial", 'B', 14)
-    pdf.set_fill_color(220, 220, 220)
-    pdf.cell(190, 10, txt="  PROPOSTA COMERCIAL", ln=True, align='L', fill=True)
+    pdf.set_font("Arial", 'B', 13)
+    pdf.set_fill_color(50, 50, 50) # Cinza escuro
+    pdf.set_text_color(255, 255, 255) # Texto branco
+    pdf.cell(190, 8, txt="  PROPOSTA COMERCIAL", ln=True, align='L', fill=True)
+    pdf.set_text_color(0, 0, 0) # Volta preto
     pdf.ln(5)
     
-    pdf.set_font("Arial", size=11)
+    pdf.set_font("Arial", '', 11)
     txt_com_limpo = texto_comercial.encode('latin-1', 'replace').decode('latin-1')
     pdf.multi_cell(190, 6, txt=txt_com_limpo)
     pdf.ln(5)
     
+    # Valores Finais
     if total_final != total_calc:
-        pdf.set_font("Arial", size=11)
+        pdf.set_font("Arial", '', 11)
         pdf.cell(140, 8, "Soma dos Serviços:", 0, align='R')
         pdf.cell(50, 8, f"R$ {total_calc:,.2f}", 0, align='R')
         pdf.ln()
+        
         diff = total_final - total_calc
-        txt_ajuste = "Desconto:" if diff < 0 else "Ajuste:"
+        txt_ajuste = "Desconto Aplicado:" if diff < 0 else "Ajuste / Acréscimo:"
         pdf.cell(140, 8, txt_ajuste, 0, align='R')
         pdf.cell(50, 8, f"R$ {diff:,.2f}", 0, align='R')
         pdf.ln(2)
 
-    pdf.set_font("Arial", 'B', 18)
-    pdf.cell(140, 12, "VALOR FINAL:", 0, align='R')
-    pdf.cell(50, 12, f"R$ {total_final:,.2f}", 0, align='R')
+    pdf.set_font("Arial", 'B', 16)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(140, 12, "VALOR FINAL:", 0, align='R', fill=True)
+    pdf.cell(50, 12, f"R$ {total_final:,.2f}", 0, align='R', fill=True)
     pdf.ln(10)
     
-    pdf.set_font("Arial", size=9)
+    # Obs Rodapé
+    pdf.set_font("Arial", 'I', 9)
     obs_limpa = obs.encode('latin-1', 'replace').decode('latin-1')
     pdf.multi_cell(190, 5, txt=f"Obs: {obs_limpa}")
-    
-    pdf.ln(15)
-    pdf.cell(190, 5, "__________________________________________________", ln=True, align='C')
-    pdf.cell(190, 5, "UPDOWN SERVICOS DE ALTA PERFORMANCE", ln=True, align='C')
     
     return pdf.output(dest='S').encode('latin-1')
 
 # --- INTERFACE ---
-st.sidebar.image(ARQUIVO_LOGO, width=200) if os.path.exists(ARQUIVO_LOGO) else None
+if os.path.exists(ARQUIVO_LOGO):
+    st.sidebar.image(ARQUIVO_LOGO, width=200)
 st.title("🏗️ Sistema UpDown - Comercial")
 st.markdown("---")
 
@@ -213,7 +255,7 @@ if menu == "Novo Orçamento":
             bloco['titulo'] = c_tit.text_input(f"Título do Serviço {i+1}", value=bloco['titulo'], placeholder="Ex: Impermeabilização Janelas", key=f"t_{i}")
             if c_del.button("🗑️", key=f"d_{i}"): remove_idx.append(i)
             
-            bloco['descricao'] = st.text_area(f"Descrição Técnica {i+1}", value=bloco['descricao'], height=150, key=f"desc_{i}", help="Escreva o texto longo aqui.")
+            bloco['descricao'] = st.text_area(f"Descrição Técnica {i+1}", value=bloco['descricao'], height=100, key=f"desc_{i}", help="Escreva o texto longo aqui.")
             
             st.markdown(f"**Materiais:**")
             c_m, c_q, c_a = st.columns([3, 1, 1])
@@ -270,9 +312,12 @@ if menu == "Novo Orçamento":
         else:
             hoje = datetime.today().strftime("%d/%m/%Y")
             val = (datetime.today() + timedelta(days=15)).strftime("%d/%m/%Y")
+            
             pdf_bytes = gerar_pdf(cliente, cnpj, hoje, val, st.session_state.blocos, total_calc, total_final, txt_com, obs)
+            
             link = f"https://wa.me/55{zap}?text={quote(f'Olá {cliente}, proposta: R$ {total_final:,.2f}')}" if zap else "#"
             salvar_historico({"Data": hoje, "Cliente": cliente, "Total": total_final, "Link Zap": link})
+            
             st.success("Gerado com sucesso!")
             c1, c2 = st.columns(2)
             c1.download_button("⬇️ Baixar PDF", pdf_bytes, f"Proposta_{cliente}.pdf", "application/pdf")
@@ -282,25 +327,24 @@ if menu == "Novo Orçamento":
 # TELA 2: BANCO DE MATERIAIS
 # ==============================================================================
 elif menu == "Banco de Materiais":
-    st.header("📦 Banco de Materiais (Salvo Automaticamente)")
-    st.info("Aqui você gerencia os materiais. A descrição é opcional, mas ajuda a detalhar.")
+    st.header("📦 Banco de Materiais")
+    st.info("Adicione ou edite materiais.")
 
-    # EDITOR DE DADOS COM A COLUNA DESCRIÇÃO
     df_edit = st.data_editor(
         df_materiais,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "Material": st.column_config.TextColumn("Nome do Material", width="medium", required=True),
+            "Material": st.column_config.TextColumn("Nome", width="medium", required=True),
             "Descricao": st.column_config.TextColumn("Descrição", width="large"),
-            "Preco_Unitario": st.column_config.NumberColumn("Preço Unitário (R$)", format="R$ %.2f")
+            "Preco_Unitario": st.column_config.NumberColumn("Preço (R$)", format="R$ %.2f")
         },
         key="editor"
     )
 
     if st.button("💾 Salvar Alterações"):
         salvar_materiais(df_edit)
-        st.success("Banco de dados atualizado!")
+        st.success("Salvo!")
         st.rerun()
 
     st.markdown("---")
