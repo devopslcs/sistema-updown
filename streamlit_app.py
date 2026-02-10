@@ -7,24 +7,29 @@ from urllib.parse import quote
 from PIL import Image
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="UpDown Pro - Business Premium", page_icon="🏗️", layout="wide")
+st.set_page_config(page_title="UpDown Pro - Gestão Comercial", page_icon="🏗️", layout="wide")
 
-# CONFIGURAÇÃO DE ARQUIVOS
+# CONFIGURAÇÃO DE ARQUIVOS E ARTES
 ARQUIVO_MATERIAIS = 'banco_materiais.csv'
 ARQUIVO_HISTORICO = 'historico_orcamentos.csv'
 ARQUIVO_LOGO = 'Logo sem fundo.png'
 ARTES_INTRO = ['capa_1.png', 'capa_2.png', 'capa_3.png']
 ARTES_OUTRO = ['capa_4.png', 'capa_5.png', 'capa_6.png', 'capa_7.png', 'capa_8.png']
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÕES DE UTILITÁRIOS ---
 def formatar_qtd(valor):
-    """Exibe 1 em vez de 1.0 e 1.5 em vez de 1.50"""
-    return f"{int(valor)}" if valor == int(valor) else f"{valor}".replace('.', ',')
+    """Exibe 1 em vez de 1.0 e 1,5 em vez de 1.5"""
+    if valor == int(valor):
+        return f"{int(valor)}"
+    return f"{valor}".replace('.', ',')
 
 def carregar_materiais():
     if not os.path.exists(ARQUIVO_MATERIAIS):
         return pd.DataFrame(columns=["Material", "Descricao", "Preco_Unitario"])
     return pd.read_csv(ARQUIVO_MATERIAIS)
+
+def salvar_materiais(df):
+    df.to_csv(ARQUIVO_MATERIAIS, index=False)
 
 # --- CLASSE PDF CUSTOMIZADA ---
 class UpDownPDF(FPDF):
@@ -34,7 +39,7 @@ class UpDownPDF(FPDF):
         self.total_outro_start = total_outro_start
 
     def header(self):
-        # O cabeçalho só aparece nas páginas de ORÇAMENTO (após as capas e antes do encerramento)
+        # O cabeçalho aparece apenas nas páginas do orçamento técnico
         if self.intro_count < self.page_no() < self.total_outro_start:
             if os.path.exists(ARQUIVO_LOGO):
                 self.image(ARQUIVO_LOGO, x=10, y=8, w=25)
@@ -54,10 +59,9 @@ class UpDownPDF(FPDF):
             self.set_font("helvetica", 'I', 8)
             self.cell(0, 10, f"Página {self.page_no()}", align='C')
 
-# --- MOTOR DE GERAÇÃO DE PDF ---
+# --- GERADOR DE PDF ---
 def gerar_pdf_premium(cliente, cnpj, data, blocos, total_calc, total_final, texto_comercial, obs):
-    # Calculamos onde o orçamento termina para saber quando parar de mostrar o header
-    # Inicialmente não sabemos, então estimamos após rodar o conteúdo
+    # Inicializa o PDF com contador de páginas para controle de capas
     pdf = UpDownPDF(intro_count=len(ARTES_INTRO), total_outro_start=999) 
     pdf.set_auto_page_break(auto=True, margin=25)
 
@@ -65,12 +69,10 @@ def gerar_pdf_premium(cliente, cnpj, data, blocos, total_calc, total_final, text
     for arte in ARTES_INTRO:
         pdf.add_page()
         if os.path.exists(arte):
-            # w=210, h=297 é o tamanho exato da folha A4 em mm
+            # Cobre a página A4 inteira (210x297mm)
             pdf.image(arte, x=0, y=0, w=210, h=297)
-        else:
-            pdf.cell(0, 10, f"Aviso: Arquivo {arte} não encontrado.", ln=True)
 
-    # 2. CONTEÚDO DO ORÇAMENTO
+    # 2. CONTEÚDO DINÂMICO DO ORÇAMENTO
     pdf.add_page()
     pdf.ln(20)
     pdf.set_font("helvetica", 'B', 16)
@@ -98,31 +100,39 @@ def gerar_pdf_premium(cliente, cnpj, data, blocos, total_calc, total_final, text
         pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
 
-        # Diagnóstico e Fotos
-        pdf.set_font("helvetica", 'B', 10)
-        pdf.cell(190, 6, "Diagnóstico da Avaria:", ln=True)
-        pdf.set_font("helvetica", '', 10)
-        pdf.multi_cell(190, 5, bloco['desc_avaria'])
-        pdf.ln(2)
+        # Diagnóstico
+        if bloco['desc_avaria']:
+            pdf.set_font("helvetica", 'B', 10)
+            pdf.cell(190, 6, "Diagnóstico da Avaria:", ln=True)
+            pdf.set_font("helvetica", '', 10)
+            pdf.multi_cell(190, 5, bloco['desc_avaria'])
+            pdf.ln(2)
 
+        # Fotos (Até 3)
         if bloco['fotos']:
             y_fotos = pdf.get_y()
-            largura_f = 60 if len(bloco['fotos']) > 1 else 90
+            num_fotos = len(bloco['fotos'])
+            largura_f = 60 if num_fotos > 1 else 90
+            
             for idx, foto in enumerate(bloco['fotos']):
-                img = Image.open(foto)
-                temp_name = f"temp_{i}_{idx}.png"
-                img.save(temp_name)
-                pdf.image(temp_name, x=10 + (idx * (largura_f + 5)), y=y_fotos, w=largura_f)
+                try:
+                    img = Image.open(foto)
+                    temp_name = f"temp_{i}_{idx}.png"
+                    img.save(temp_name)
+                    pdf.image(temp_name, x=10 + (idx * (largura_f + 5)), y=y_fotos, w=largura_f)
+                except: pass
+            
+            # Ajusta o cursor para baixo das fotos
             pdf.set_y(y_fotos + largura_f * 0.8 + 5)
 
-        # Solução
+        # Solução Técnica
         pdf.set_font("helvetica", 'B', 10)
         pdf.cell(190, 6, "Solução Técnica Proposta:", ln=True)
         pdf.set_font("helvetica", '', 10)
         pdf.multi_cell(190, 5, bloco['descricao'])
         pdf.ln(4)
 
-        # Tabela de Materiais
+        # Materiais/Insumos
         if bloco['materiais']:
             pdf.set_fill_color(245, 245, 245)
             pdf.set_font("helvetica", 'B', 9)
@@ -138,11 +148,13 @@ def gerar_pdf_premium(cliente, cnpj, data, blocos, total_calc, total_final, text
                 pdf.cell(30, 6, f"{m['total']:,.2f}", 1, 1, 'R')
         
         pdf.set_font("helvetica", 'B', 10)
-        pdf.cell(150, 7, "Subtotal do Item (Materiais + Mão de Obra + NF): ", 0, 0, 'R')
+        pdf.cell(150, 7, "Subtotal do Serviço (Material + Mão de Obra + NF): ", 0, 0, 'R')
         pdf.cell(40, 7, f"R$ {bloco['total_bloco']:,.2f}", 0, 1, 'R')
         pdf.ln(5)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(5)
 
-    # Fechamento Comercial
+    # Proposta Comercial Final
     if pdf.get_y() > 200: pdf.add_page()
     pdf.set_font("helvetica", 'B', 13)
     pdf.cell(190, 10, "CONDIÇÕES COMERCIAIS", ln=True)
@@ -169,28 +181,31 @@ def gerar_pdf_premium(cliente, cnpj, data, blocos, total_calc, total_final, text
         if os.path.exists(arte):
             pdf.image(arte, x=0, y=0, w=210, h=297)
 
-    # Limpeza de temporários
+    # Limpeza de arquivos temporários
     for f in os.listdir():
-        if f.startswith("temp_"): os.remove(f)
+        if f.startswith("temp_"):
+            try: os.remove(f)
+            except: pass
 
-    return pdf.output(dest='S').encode('latin-1')
+    # RETORNO CORRIGIDO PARA FPDF2
+    return pdf.output()
 
 # --- INTERFACE STREAMLIT ---
-st.title("🏗️ UpDown Pro - Gerador de Propostas Premium")
+st.title("🏗️ UpDown Pro - High Performance Proposals")
 
 df_materiais = carregar_materiais()
-menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Banco de Materiais"])
+menu = st.sidebar.radio("Navegação", ["Novo Orçamento", "Banco de Materiais"])
 
-if menu == "Criar Orçamento":
+if menu == "Novo Orçamento":
     with st.expander("👤 Dados do Cliente", expanded=True):
-        col1, col2 = st.columns(2)
-        cliente = col1.text_input("Nome do Cliente / Condomínio")
-        cnpj = col2.text_input("CNPJ / CPF")
+        c1, c2 = st.columns(2)
+        cliente = c1.text_input("Cliente / Condomínio")
+        cnpj = c2.text_input("CNPJ / CPF")
         zap = st.text_input("WhatsApp para contato")
 
     if 'blocos' not in st.session_state: st.session_state.blocos = []
 
-    if st.button("➕ Adicionar Serviço ao Orçamento"):
+    if st.button("➕ Adicionar Serviço"):
         st.session_state.blocos.append({
             "titulo": "", "descricao": "", "desc_avaria": "", "fotos": [],
             "materiais": [], "valor_mo": 0.0, "soma_materiais": 0.0, "total_bloco": 0.0
@@ -199,23 +214,23 @@ if menu == "Criar Orçamento":
     remover_idx = None
     for i, bloco in enumerate(st.session_state.blocos):
         with st.container(border=True):
-            c_tit, c_btn = st.columns([6, 1])
-            bloco['titulo'] = c_tit.text_input(f"Título do Serviço {i+1}", value=bloco['titulo'], key=f"t_{i}")
-            if c_btn.button("🗑️", key=f"del_{i}"): remover_idx = i
+            ct, cr = st.columns([6, 1])
+            bloco['titulo'] = ct.text_input(f"Título do Serviço {i+1}", value=bloco['titulo'], key=f"t_{i}")
+            if cr.button("🗑️", key=f"del_{i}"): remover_idx = i
 
-            st.write("**📸 Diagnóstico e Imagens**")
-            col_f1, col_f2 = st.columns([1, 2])
-            fotos_upload = col_f1.file_uploader(f"Anexar até 3 fotos (Item {i+1})", type=['jpg','jpeg','png'], key=f"f_{i}", accept_multiple_files=True)
-            bloco['fotos'] = fotos_upload[:3] if fotos_upload else []
-            bloco['desc_avaria'] = col_f2.text_area(f"O que foi identificado na avaria?", value=bloco['desc_avaria'], key=f"da_{i}", height=100)
+            st.write("**📸 Registro de Avaria**")
+            cf1, cf2 = st.columns([1, 2])
+            fotos_up = cf1.file_uploader(f"Anexar fotos (Item {i+1})", type=['jpg','jpeg','png'], key=f"f_{i}", accept_multiple_files=True)
+            bloco['fotos'] = fotos_up[:3] if fotos_up else []
+            bloco['desc_avaria'] = cf2.text_area(f"O que foi identificado?", value=bloco['desc_avaria'], key=f"da_{i}", height=100)
             
-            bloco['descricao'] = st.text_area(f"Solução Técnica Proposta (O que faremos)", value=bloco['descricao'], key=f"sol_{i}")
+            bloco['descricao'] = st.text_area(f"Solução Técnica (Processo)", value=bloco['descricao'], key=f"sol_{i}")
 
-            st.write("**📦 Insumos e Mão de Obra**")
+            st.write("**📦 Insumos**")
             cm, cq, ca = st.columns([3, 1, 1])
             sel = cm.selectbox("Material", df_materiais['Material'].unique() if not df_materiais.empty else [], key=f"sel_{i}", index=None)
             qtd = cq.number_input("Qtd", 1.0, key=f"q_{i}", step=1.0)
-            if ca.button("Add", key=f"add_{i}"):
+            if ca.button("Adicionar Insumo", key=f"add_{i}"):
                 if sel:
                     preco = df_materiais[df_materiais['Material'] == sel]['Preco_Unitario'].values[0]
                     bloco['materiais'].append({"nome": sel, "qtd": qtd, "unit": preco, "total": preco*qtd})
@@ -238,23 +253,25 @@ if menu == "Criar Orçamento":
     total_calc = sum(b['total_bloco'] for b in st.session_state.blocos)
     
     col_c1, col_c2 = st.columns(2)
-    txt_com = col_c1.text_area("Condições Comerciais", "Pagamento: 50% de sinal e 50% na conclusão.\nInício: A combinar.", height=150)
-    total_final = col_c2.number_input("VALOR FINAL NEGOCIADO (R$)", value=float(total_calc))
-    obs_f = st.text_input("Observações de Rodapé (Garantia, Validade etc)")
+    txt_com = col_c1.text_area("Condições Comerciais", "Pagamento: 50% de entrada e 50% na conclusão.", height=150)
+    total_final = col_c2.number_input("VALOR FINAL ACORDADO (R$)", value=float(total_calc))
+    obs_f = st.text_input("Notas de Rodapé")
 
-    if st.button("🚀 GERAR PROPOSTA PDF COMPLETA", type="primary", use_container_width=True):
+    if st.button("🚀 GERAR PROPOSTA PDF", type="primary", use_container_width=True):
         if not cliente:
-            st.error("Nome do cliente obrigatório.")
+            st.error("Preencha o nome do cliente.")
         else:
             hoje = datetime.today().strftime("%d/%m/%Y")
+            # PDF_BYTES agora recebe os dados binários direto
             pdf_bytes = gerar_pdf_premium(cliente, cnpj, hoje, st.session_state.blocos, total_calc, total_final, txt_com, obs_f)
+            
             st.success("Proposta gerada com sucesso!")
-            st.download_button("⬇️ Baixar PDF", pdf_bytes, f"Proposta_{cliente}.pdf", "application/pdf")
+            st.download_button("⬇️ Baixar Proposta PDF", pdf_bytes, f"Proposta_{cliente}.pdf", "application/pdf")
 
 elif menu == "Banco de Materiais":
-    st.header("📦 Gerenciamento de Insumos")
+    st.header("📦 Gerenciamento de Materiais")
     df_m = carregar_materiais()
     df_edit = st.data_editor(df_m, num_rows="dynamic", use_container_width=True)
-    if st.button("Salvar Alterações"):
+    if st.button("💾 Salvar Banco de Dados"):
         salvar_materiais(df_edit)
-        st.success("Banco de dados atualizado!")
+        st.success("Dados salvos!")
